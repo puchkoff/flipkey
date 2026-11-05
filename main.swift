@@ -136,17 +136,6 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
-let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-if !AXIsProcessTrustedWithOptions(prompt) {
-    print("Waiting for Accessibility access in System Settings > Privacy & Security...")
-    while !AXIsProcessTrusted() { sleep(1) }  // no relaunch needed once the user allows it
-}
-let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
-tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                        eventsOfInterest: CGEventMask(mask), callback: callback, userInfo: nil)
-guard let tap else { print("Could not create the event tap."); exit(1) }
-CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
-CGEvent.tapEnable(tap: tap, enable: true)
 final class Actions: NSObject {
     @objc func about() {
         let repo = "https://github.com/puchkoff/flipkey"
@@ -171,4 +160,18 @@ item.menu = NSMenu()
 item.menu?.addItem(withTitle: "About flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
 item.menu?.addItem(.separator())
 item.menu?.addItem(withTitle: "Quit flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+// Accessibility access is needed for the key tap; wait for it without blocking, so the icon shows meanwhile.
+let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+_ = AXIsProcessTrustedWithOptions(prompt)
+Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+    guard AXIsProcessTrusted() else { return }
+    timer.invalidate()
+    let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
+    tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                            eventsOfInterest: CGEventMask(mask), callback: callback, userInfo: nil)
+    guard let tap else { print("Could not create the event tap."); exit(1) }
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+}
 app.run()
