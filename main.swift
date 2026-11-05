@@ -23,6 +23,15 @@ struct Key { let code: Int64; let shift: Bool }
 var word: [Key] = []
 var prev: (lang: String?, words: [[Key]]) = (nil, [])  // words just before `word`, same layout, not converted
 var tap: CFMachPort?
+var lastFix: (text: String, boundary: Int64, lang: String)?  // what double Shift undoes; any other key clears it
+var shiftClean = false, lastShiftTap = Date.distantPast  // a "tap" is a Shift press with no other key in between
+
+// Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
+let enToRu = Dictionary(uniqueKeysWithValues: keys.values.flatMap {
+    [(Character($0.0), Character($0.2)), (Character($0.1), Character($0.2.uppercased()))]
+})
+let ruToEn = Dictionary(uniqueKeysWithValues: enToRu.map { ($1, $0) })
+func swapLayout(_ s: String, toRu: Bool) -> String { String(s.map { (toRu ? enToRu : ruToEn)[$0] ?? $0 }) }
 
 func text(_ word: [Key], ru: Bool) -> String {
     word.map { k in
@@ -76,13 +85,58 @@ func select(lang wanted: String) {
     if let s = list.first(where: { lang($0) == wanted }) { TISSelectInputSource(s) }
 }
 
-func post(_ code: CGKeyCode, _ string: String? = nil) {
+func post(_ code: CGKeyCode, _ string: String? = nil, flags: CGEventFlags = []) {
     for down in [true, false] {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
-        e.flags = []
+        e.flags = flags
         if let string { e.keyboardSetUnicodeString(stringLength: string.utf16.count, unicodeString: Array(string.utf16)) }
         e.setIntegerValueField(.eventSourceUserData, value: magic)
         e.post(tap: .cgSessionEventTap)
+    }
+}
+
+func typeText(_ s: String) {
+    for ch in s { post(0, String(ch)) }  // one char per event: some apps drop longer unicode strings
+}
+
+// Retypes the selection in the other layout. Reads it via Cmd+C, then puts the old clipboard back.
+func convertSelection() {
+    let pb = NSPasteboard.general, before = pb.changeCount
+    let saved = (pb.pasteboardItems ?? []).map { item in  // every type, so images and rich text survive
+        let copy = NSPasteboardItem()
+        for t in item.types { if let d = item.data(forType: t) { copy.setData(d, forType: t) } }
+        return copy
+    }
+    post(0x08, flags: .maskCommand)  // C
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        guard pb.changeCount != before else { return }  // nothing was selected
+        defer { pb.clearContents(); pb.writeObjects(saved) }
+        // shortcut: apps that copy the whole line with no selection (VS Code) get that line inserted; detect via AX if it bites.
+        guard let sel = pb.string(forType: .string), !sel.isEmpty else { return }
+        let toRu = !sel.contains { ruToEn[$0] != nil }
+        typeText(swapLayout(sel, toRu: toRu))
+        select(lang: toRu ? "ru" : "en")
+    }
+}
+
+func onDoubleShift() {
+    guard let f = lastFix else { return convertSelection() }
+    lastFix = nil
+    for _ in 0...f.text.count { post(CGKeyCode(backspace)) }  // + the replayed boundary key
+    select(lang: f.lang)
+    typeText(swapLayout(f.text, toRu: f.lang == "ru"))
+    post(CGKeyCode(f.boundary))
+}
+
+func onFlagsChanged(_ event: CGEvent) {
+    let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
+    guard code == 56 || code == 60 else { shiftClean = false; return }  // left or right Shift
+    if flags.contains(.maskShift) {
+        shiftClean = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+    } else if shiftClean {
+        shiftClean = false
+        if Date().timeIntervalSince(lastShiftTap) < 0.4 { lastShiftTap = .distantPast; onDoubleShift() }
+        else { lastShiftTap = Date() }
     }
 }
 
@@ -92,10 +146,11 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         return pass
     }
-    guard type == .keyDown, event.getIntegerValueField(.eventSourceUserData) != magic else {
-        if type == .leftMouseDown { word = []; prev.words = [] }  // caret moved, the buffer no longer matches the screen
-        return pass
-    }
+    if event.getIntegerValueField(.eventSourceUserData) == magic { return pass }
+    if type == .leftMouseDown { word = []; prev.words = []; lastFix = nil }  // caret moved, buffers no longer match
+    if type == .flagsChanged { onFlagsChanged(event) }
+    guard type == .keyDown else { return pass }
+    lastFix = nil; shiftClean = false; lastShiftTap = .distantPast
     let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
     if flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty, keys[code] != nil {
         word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift)))
@@ -117,8 +172,9 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     // Swallow the boundary key and replay it after the fix so the order on screen stays right.
     for _ in 0..<fix.erase { post(CGKeyCode(backspace)) }
     select(lang: current == "ru" ? "en" : "ru")
-    for ch in fix.text { post(0, String(ch)) }  // one char per event: some apps drop longer unicode strings
+    typeText(fix.text)
     post(CGKeyCode(code))
+    lastFix = (fix.text, code, current!)
     return nil
 }
 
@@ -132,6 +188,9 @@ if CommandLine.arguments.contains("--selftest") {
     assert(fixPhrase([], typed("b"), currentRu: false) == nil)  // lone "и" is too ambiguous
     assert(fixPhrase([typed("b")], typed("ghbdtn"), currentRu: false)! == (8, "и привет"))
     assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (6, "в доме"))
+    assert(swapLayout("ghbdtn", toRu: true) == "привет")
+    assert(swapLayout("Руддщб", toRu: false) == "Hello,")
+    assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo
     print("selftest ok")
     exit(0)
 }
@@ -140,11 +199,13 @@ final class Actions: NSObject {
     @objc func about() {
         let repo = "https://github.com/puchkoff/flipkey"
         NSApp.activate(ignoringOtherApps: true)  // a menu bar app's panel opens behind other windows otherwise
-        NSApp.orderFrontStandardAboutPanel(options: [  // name, version and icon come from the .app bundle
-            .credits: NSAttributedString(
-                string: "Fixes words typed in the wrong keyboard layout (Russian ⇄ English).\n\(repo)",
-                attributes: [.link: URL(string: repo)!]),
-        ])
+        let center = NSMutableParagraphStyle()
+        center.alignment = .center
+        let credits = NSMutableAttributedString(
+            string: "Fixes words typed in the wrong keyboard layout (Russian ⇄ English).\n\(repo)",
+            attributes: [.paragraphStyle: center, .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])
+        credits.addAttribute(.link, value: URL(string: repo)!, range: NSRange(location: credits.length - repo.utf16.count, length: repo.utf16.count))
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])  // name, version and icon come from the .app bundle
     }
 }
 
@@ -171,6 +232,7 @@ Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
     guard AXIsProcessTrusted() else { return }
     timer.invalidate()
     let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
+        | (1 << CGEventType.flagsChanged.rawValue)
     tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                             eventsOfInterest: CGEventMask(mask), callback: callback, userInfo: nil)
     guard let tap else { print("Could not create the event tap."); exit(1) }

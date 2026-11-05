@@ -10,6 +10,11 @@ When you press Space, Enter or Tab, Flipkey looks at the last word in both layou
 If the word looks wrong in the current layout but is a real word in the other one, Flipkey retypes it and switches the layout.
 Short words typed just before it in the same wrong layout get fixed too, so `b lfdfq` becomes `и давай`.
 
+Press Shift twice quickly to:
+
+- undo the last fix, right after it happened, if Flipkey got it wrong;
+- otherwise, retype the selected text in the other layout and switch to that layout.
+
 A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.
 The vowel rule matters because the spell checker slowly learns words you type often, including mistyped ones like `ghbdtn`.
 
@@ -32,7 +37,8 @@ Without it the build is ad-hoc signed, and macOS silently drops the grant after 
 ## Limits
 
 - It supports only the ABC/US and Russian (ЙЦУКЕН) layouts.
-- It has no hotkey to undo or convert a word by hand.
+- Double Shift reads the selection through the clipboard and then restores it. Apps that copy the whole line when nothing is selected (VS Code) get that line inserted.
+- Double Shift also triggers whatever else listens for it, such as Search Everywhere in JetBrains IDEs.
 - It ignores `ё` and Russian punctuation keys.
 - It leaves alone words the spell checker doesn't know, such as names and slang.
 - A short word on its own, like `b` for `и`, is too ambiguous to fix; it is fixed only together with the next word.
