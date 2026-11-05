@@ -117,5 +117,10 @@ tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, opt
 guard let tap else { print("Could not create the event tap."); exit(1) }
 CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
-print("Running. Press Ctrl+C to stop.")
-CFRunLoopRun()
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
+let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+item.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "flipkey")
+item.menu = NSMenu()
+item.menu?.addItem(withTitle: "Quit flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+app.run()
