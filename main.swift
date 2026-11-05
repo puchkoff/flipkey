@@ -151,15 +151,18 @@ final class Actions: NSObject {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
 let actions = Actions()
+// New items go leftmost, where a full menu bar hides them behind the notch; start near the clock instead.
+UserDefaults.standard.register(defaults: ["NSStatusItem Preferred Position Flipkey": 250])
 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+item.autosaveName = "Flipkey"  // keeps the spot after the user Cmd-drags it
 let icon = Bundle.main.image(forResource: "MenuBarIcon")  // nil when run as a bare binary, not the .app
 icon?.size = NSSize(width: 30, height: 18)
 icon?.isTemplate = true  // macOS tints it for light and dark menu bars
-item.button?.image = icon ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "flipkey")
+item.button?.image = icon ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Flipkey")
 item.menu = NSMenu()
-item.menu?.addItem(withTitle: "About flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
+item.menu?.addItem(withTitle: "About Flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
 item.menu?.addItem(.separator())
-item.menu?.addItem(withTitle: "Quit flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+item.menu?.addItem(withTitle: "Quit Flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
 // Accessibility access is needed for the key tap; wait for it without blocking, so the icon shows meanwhile.
 let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
