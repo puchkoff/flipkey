@@ -148,8 +148,11 @@ func convertSelection() {
     }
 }
 
-// Undo the last fix, else convert the last word as typed, else convert the selection.
+// Undo the last fix, else convert the word being typed or the last word, else convert the selection.
 func onDoubleShift() {
+    if !word.isEmpty, let cur = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) {
+        lastWord = (word, "", cur); word = []; prev.words = []; lastFix = nil
+    }
     if let f = lastFix {
         lastFix = nil
         erase(f.text.count + f.tail.count)

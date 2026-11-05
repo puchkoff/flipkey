@@ -13,7 +13,7 @@ Short words typed just before it in the same wrong layout get fixed too, so `b l
 Press Shift twice quickly to:
 
 - undo the last fix, right after it happened, if Flipkey got it wrong;
-- convert the last word you typed, if Flipkey left it alone (a name, slang); press again to flip it back;
+- convert the word you are typing, or the last word if Flipkey left it alone (a name, slang); press again to flip it back;
 - with text selected, retype the selection in the other layout and switch to that layout.
 
 A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.
