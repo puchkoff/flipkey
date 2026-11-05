@@ -13,7 +13,7 @@ let keys: [Int64: (String, String, String)] = [
     0x07: ("x", "X", "ч"), 0x08: ("c", "C", "с"), 0x09: ("v", "V", "м"), 0x0B: ("b", "B", "и"),
     0x2D: ("n", "N", "т"), 0x2E: ("m", "M", "ь"), 0x2B: (",", "<", "б"), 0x2F: (".", ">", "ю"),
 ]
-let backspace: Int64 = 0x33, space: Int64 = 0x31, boundaries: Set<Int64> = [space, 0x24, 0x30]  // + return, tab
+let backspace: Int64 = 0x33, returnKey: Int64 = 0x24, tabKey: Int64 = 0x30
 // The spell checker accepts any single letter, so one-letter words need an explicit list.
 let oneLetterWords = ["ru": Set("авикосуяАВИКОСУЯ".map(String.init)), "en": ["a", "A", "I"]]
 let vowels = ["ru": Set("аеёиоуыэюяАЕЁИОУЫЭЮЯ"), "en": Set("aeiouyAEIOUY")]
@@ -23,7 +23,9 @@ struct Key { let code: Int64; let shift: Bool }
 var word: [Key] = []
 var prev: (lang: String?, words: [[Key]]) = (nil, [])  // words just before `word`, same layout, not converted
 var tap: CFMachPort?
-var lastFix: (text: String, boundary: Int64, lang: String)?  // what double Shift undoes; any other key clears it
+// Text typed after the word ("?", " ") is kept in `tail` so double Shift can erase and retype it.
+var lastFix: (text: String, tail: String, lang: String)?  // what double Shift undoes
+var lastWord: (keys: [Key], tail: String, lang: String)?  // last word left as typed; double Shift converts it
 var shiftClean = false, lastShiftTap = Date.distantPast  // a "tap" is a Shift press with no other key in between
 
 // Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
@@ -61,14 +63,22 @@ func converted(_ word: [Key], currentRu: Bool) -> String? {
 // Fixes the word plus the words right before it that were typed in the same wrong layout,
 // so "b ghbdtn" becomes "и привет". A lone short word is too ambiguous to fix on its own.
 func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
-    guard word.count >= 2, let fix = converted(word, currentRu: ru) else { return nil }
-    var words = [fix], erase = word.count
-    for p in prev.reversed() {
-        guard let f = converted(p, currentRu: ru) else { break }
-        words.insert(f, at: 0)
-        erase += p.count + 1  // + the space after it
+    var core = word, tail = ""
+    while true {
+        if core.count >= 2, let fix = converted(core, currentRu: ru) {
+            var words = [fix], erase = word.count
+            for p in prev.reversed() {
+                guard let f = converted(p, currentRu: ru) else { break }
+                words.insert(f, at: 0)
+                erase += p.count + 1  // + the space after it
+            }
+            return (erase, words.joined(separator: " ") + tail)
+        }
+        // In "ghbdtn," the comma key is the Russian "б" but was meant as punctuation; retry without it.
+        guard !ru, let k = core.last, !Character(keys[k.code]!.0).isLetter else { return nil }
+        tail = text([k], ru: false) + tail
+        core.removeLast()
     }
-    return (erase, words.joined(separator: " "))
 }
 
 func lang(_ s: TISInputSource) -> String? {
@@ -96,7 +106,26 @@ func post(_ code: CGKeyCode, _ string: String? = nil, flags: CGEventFlags = []) 
 }
 
 func typeText(_ s: String) {
-    for ch in s { post(0, String(ch)) }  // one char per event: some apps drop longer unicode strings
+    for ch in s {  // one char per event: some apps drop longer unicode strings
+        switch ch {
+        case "\n": post(CGKeyCode(returnKey))  // a typed newline character isn't Return in every app
+        case "\t": post(CGKeyCode(tabKey))
+        default: post(0, String(ch))
+        }
+    }
+}
+
+func erase(_ count: Int) { for _ in 0..<count { post(CGKeyCode(backspace)) } }
+
+// The text a key event produces; empty or control characters for arrows, Escape and the like.
+func printable(_ e: CGEvent) -> String? {
+    var len = 0, buf = [UniChar](repeating: 0, count: 4)
+    e.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &len, unicodeString: &buf)
+    let s = String(utf16CodeUnits: buf, count: len)
+    let ok = !s.isEmpty && s.unicodeScalars.allSatisfy {
+        !CharacterSet.controlCharacters.contains($0) && !(0xF700...0xF8FF).contains($0.value)  // arrows, F-keys
+    }
+    return ok ? s : nil
 }
 
 // Retypes the selection in the other layout. Reads it via Cmd+C, then puts the old clipboard back.
@@ -119,13 +148,23 @@ func convertSelection() {
     }
 }
 
+// Undo the last fix, else convert the last word as typed, else convert the selection.
 func onDoubleShift() {
-    guard let f = lastFix else { return convertSelection() }
-    lastFix = nil
-    for _ in 0...f.text.count { post(CGKeyCode(backspace)) }  // + the replayed boundary key
-    select(lang: f.lang)
-    typeText(swapLayout(f.text, toRu: f.lang == "ru"))
-    post(CGKeyCode(f.boundary))
+    if let f = lastFix {
+        lastFix = nil
+        erase(f.text.count + f.tail.count)
+        select(lang: f.lang)
+        typeText(swapLayout(f.text, toRu: f.lang == "ru") + f.tail)
+    } else if let w = lastWord {
+        lastWord = nil
+        let ru = w.lang == "ru", fixed = text(w.keys, ru: !ru)
+        erase(w.keys.count + w.tail.count)
+        select(lang: ru ? "en" : "ru")
+        typeText(fixed + w.tail)
+        lastFix = (fixed, w.tail, w.lang)  // a second double Shift flips it back
+    } else {
+        convertSelection()
+    }
 }
 
 func onFlagsChanged(_ event: CGEvent) {
@@ -147,34 +186,51 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         return pass
     }
     if event.getIntegerValueField(.eventSourceUserData) == magic { return pass }
-    if type == .leftMouseDown { word = []; prev.words = []; lastFix = nil }  // caret moved, buffers no longer match
     if type == .flagsChanged { onFlagsChanged(event) }
-    guard type == .keyDown else { return pass }
-    lastFix = nil; shiftClean = false; lastShiftTap = .distantPast
+    guard type == .keyDown else {
+        // A click moves the caret, so the buffers no longer match the screen.
+        if type == .leftMouseDown { word = []; prev.words = []; lastFix = nil; lastWord = nil }
+        return pass
+    }
+    shiftClean = false; lastShiftTap = .distantPast
     let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
-    if flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty, keys[code] != nil {
+    let plain = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+    if plain, keys[code] != nil {
         word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift)))
+        lastFix = nil; lastWord = nil
         return pass
     }
     if code == backspace, flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
         if word.isEmpty { prev.words = [] } else { word.removeLast() }
+        lastFix = nil; lastWord = nil
         return pass
     }
     defer { word = [] }
     let current = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue())
     if prev.lang != current { prev = (current, []) }
-    guard boundaries.contains(code), current == "ru" || current == "en" else { prev.words = []; return pass }
-    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru") else {
-        prev.words = code == space && !word.isEmpty ? Array((prev.words + [word]).suffix(5)) : []
+    // Space, Return, Tab or any printed sign like "?" ends the word.
+    let tail = code == returnKey ? "\n" : code == tabKey ? "\t" : printable(event)
+    guard plain, let tail, let current, current == "ru" || current == "en" else {
+        prev.words = []; lastFix = nil; lastWord = nil
         return pass
     }
-    prev.words = []
-    // Swallow the boundary key and replay it after the fix so the order on screen stays right.
-    for _ in 0..<fix.erase { post(CGKeyCode(backspace)) }
+    if word.isEmpty {  // more text after the word, like the space in "ghbdtn? "
+        lastFix?.tail += tail
+        lastWord?.tail += tail
+        if tail != " " { prev.words = [] }
+        return pass
+    }
+    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru") else {
+        lastWord = (word, tail, current); lastFix = nil
+        prev.words = tail == " " ? Array((prev.words + [word]).suffix(5)) : []
+        return pass
+    }
+    prev.words = []; lastWord = nil
+    // Swallow the ending key and retype it after the fix so the order on screen stays right.
+    erase(fix.erase)
     select(lang: current == "ru" ? "en" : "ru")
-    typeText(fix.text)
-    post(CGKeyCode(code))
-    lastFix = (fix.text, code, current!)
+    typeText(fix.text + tail)
+    lastFix = (fix.text, tail, current)
     return nil
 }
 
@@ -188,6 +244,8 @@ if CommandLine.arguments.contains("--selftest") {
     assert(fixPhrase([], typed("b"), currentRu: false) == nil)  // lone "и" is too ambiguous
     assert(fixPhrase([typed("b")], typed("ghbdtn"), currentRu: false)! == (8, "и привет"))
     assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (6, "в доме"))
+    assert(fixPhrase([], typed("ghbdtn,"), currentRu: false)! == (7, "привет,"))  // comma kept as punctuation
+    assert(fixPhrase([], typed("k.,k."), currentRu: false)! == (5, "люблю"))  // here "," and "." are letters
     assert(swapLayout("ghbdtn", toRu: true) == "привет")
     assert(swapLayout("Руддщб", toRu: false) == "Hello,")
     assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo

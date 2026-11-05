@@ -6,14 +6,15 @@ Flipkey fixes words you typed in the wrong keyboard layout on macOS, the way Pun
 Type `ghbdtn`, press Space, and it becomes `привет`. It works in both directions, Russian and English.
 While it runs, an A⇄Я icon sits in the menu bar; click it for About or Quit.
 
-When you press Space, Enter or Tab, Flipkey looks at the last word in both layouts.
+When you press Space, Enter, Tab or a sign like `?` or `!`, Flipkey looks at the last word in both layouts.
 If the word looks wrong in the current layout but is a real word in the other one, Flipkey retypes it and switches the layout.
 Short words typed just before it in the same wrong layout get fixed too, so `b lfdfq` becomes `и давай`.
 
 Press Shift twice quickly to:
 
 - undo the last fix, right after it happened, if Flipkey got it wrong;
-- otherwise, retype the selected text in the other layout and switch to that layout.
+- convert the last word you typed, if Flipkey left it alone (a name, slang); press again to flip it back;
+- with text selected, retype the selection in the other layout and switch to that layout.
 
 A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.
 The vowel rule matters because the spell checker slowly learns words you type often, including mistyped ones like `ghbdtn`.
