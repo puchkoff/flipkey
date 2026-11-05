@@ -117,10 +117,28 @@ tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, opt
 guard let tap else { print("Could not create the event tap."); exit(1) }
 CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
+final class Actions: NSObject {
+    @objc func about() {
+        let repo = "https://github.com/puchkoff/flipkey"
+        NSApp.activate(ignoringOtherApps: true)  // a menu bar app's panel opens behind other windows otherwise
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "flipkey",
+            .applicationVersion: "0.1",
+            .applicationIcon: NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)!,
+            .credits: NSAttributedString(
+                string: "Fixes words typed in the wrong keyboard layout (Russian ⇄ English).\n\(repo)",
+                attributes: [.link: URL(string: repo)!]),
+        ])
+    }
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
+let actions = Actions()
 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 item.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "flipkey")
 item.menu = NSMenu()
+item.menu?.addItem(withTitle: "About flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
+item.menu?.addItem(.separator())
 item.menu?.addItem(withTitle: "Quit flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 app.run()

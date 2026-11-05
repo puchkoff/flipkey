@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.svg" width="128" alt="flipkey logo"></p>
+
 # flipkey
 
 flipkey fixes words you typed in the wrong keyboard layout on macOS, the way Punto Switcher does.

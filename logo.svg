@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#1e293b"/>
+  <rect x="28" y="22" width="200" height="196" rx="40" fill="#334155"/>
+  <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-weight="700" font-size="84" text-anchor="middle">
+    <text x="84" y="150" fill="#f8fafc">A</text>
+    <text x="172" y="150" fill="#38bdf8">Я</text>
+  </g>
+  <g fill="none" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M70 70 Q128 30 180 64"/>
+    <path d="M166 50 L182 66 L162 74"/>
+    <path d="M186 176 Q128 216 76 182"/>
+    <path d="M90 196 L74 180 L94 172"/>
+  </g>
+</svg>
