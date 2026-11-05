@@ -25,7 +25,7 @@ var prev: (lang: String?, words: [[Key]]) = (nil, [])  // words just before `wor
 var tap: CFMachPort?
 // Text typed after the word ("?", " ") is kept in `tail` so double Shift can erase and retype it.
 var lastFix: (text: String, tail: String, lang: String)?  // what double Shift undoes
-var lastWord: (keys: [Key], tail: String, lang: String)?  // last word left as typed; double Shift converts it
+var lastWord: (keys: [Key], tail: String, lang: String, before: [[Key]])?  // last word left as typed; double Shift converts it
 var shiftClean = false, lastShiftTap = Date.distantPast  // a "tap" is a Shift press with no other key in between
 
 // Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
@@ -60,19 +60,26 @@ func converted(_ word: [Key], currentRu: Bool) -> String? {
     return looksWrong(cur, currentRu ? "ru" : "en") && isWord(other, currentRu ? "en" : "ru") ? other : nil
 }
 
+// The words right before a word, each followed by one space, that were typed in the same wrong layout,
+// like "b" in "b ghbdtn". Returns how many characters they take and their fixed text, spaces included.
+func wrongBefore(_ prev: [[Key]], currentRu ru: Bool) -> (erase: Int, text: String) {
+    var text = "", erase = 0
+    for p in prev.reversed() {
+        guard let f = converted(p, currentRu: ru) else { break }
+        text = f + " " + text
+        erase += p.count + 1
+    }
+    return (erase, text)
+}
+
 // Fixes the word plus the words right before it that were typed in the same wrong layout,
 // so "b ghbdtn" becomes "и привет". A lone short word is too ambiguous to fix on its own.
 func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
     var core = word, tail = ""
     while true {
         if core.count >= 2, let fix = converted(core, currentRu: ru) {
-            var words = [fix], erase = word.count
-            for p in prev.reversed() {
-                guard let f = converted(p, currentRu: ru) else { break }
-                words.insert(f, at: 0)
-                erase += p.count + 1  // + the space after it
-            }
-            return (erase, words.joined(separator: " ") + tail)
+            let b = wrongBefore(prev, currentRu: ru)
+            return (b.erase + word.count, b.text + fix + tail)
         }
         // In "ghbdtn," the comma key is the Russian "б" but was meant as punctuation; retry without it.
         guard !ru, let k = core.last, !Character(keys[k.code]!.0).isLetter else { return nil }
@@ -149,9 +156,10 @@ func convertSelection() {
 }
 
 // Undo the last fix, else convert the word being typed or the last word, else convert the selection.
+// The word takes along the short words before it typed in the same wrong layout, so "b pf" becomes "и за".
 func onDoubleShift() {
     if !word.isEmpty, let cur = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) {
-        lastWord = (word, "", cur); word = []; prev.words = []; lastFix = nil
+        lastWord = (word, "", cur, prev.lang == cur ? prev.words : []); word = []; prev.words = []; lastFix = nil
     }
     if let f = lastFix {
         lastFix = nil
@@ -160,8 +168,8 @@ func onDoubleShift() {
         typeText(swapLayout(f.text, toRu: f.lang == "ru") + f.tail)
     } else if let w = lastWord {
         lastWord = nil
-        let ru = w.lang == "ru", fixed = text(w.keys, ru: !ru)
-        erase(w.keys.count + w.tail.count)
+        let ru = w.lang == "ru", b = wrongBefore(w.before, currentRu: ru), fixed = b.text + text(w.keys, ru: !ru)
+        erase(b.erase + w.keys.count + w.tail.count)
         select(lang: ru ? "en" : "ru")
         typeText(fixed + w.tail)
         lastFix = (fixed, w.tail, w.lang)  // a second double Shift flips it back
@@ -220,11 +228,11 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     if word.isEmpty {  // more text after the word, like the space in "ghbdtn? "
         lastFix?.tail += tail
         lastWord?.tail += tail
-        if tail != " " { prev.words = [] }
+        prev.words = []  // the next word is no longer one space away from these
         return pass
     }
     guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru") else {
-        lastWord = (word, tail, current); lastFix = nil
+        lastWord = (word, tail, current, prev.words); lastFix = nil
         prev.words = tail == " " ? Array((prev.words + [word]).suffix(5)) : []
         return pass
     }
@@ -249,6 +257,8 @@ if CommandLine.arguments.contains("--selftest") {
     assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (6, "в доме"))
     assert(fixPhrase([], typed("ghbdtn,"), currentRu: false)! == (7, "привет,"))  // comma kept as punctuation
     assert(fixPhrase([], typed("k.,k."), currentRu: false)! == (5, "люблю"))  // here "," and "." are letters
+    assert(wrongBefore([typed("hello"), typed("pf"), typed("b")], currentRu: false) == (5, "за и "))  // double Shift on "b pf"
+    assert(wrongBefore([typed("hello")], currentRu: false) == (0, ""))
     assert(swapLayout("ghbdtn", toRu: true) == "привет")
     assert(swapLayout("Руддщб", toRu: false) == "Hello,")
     assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo
