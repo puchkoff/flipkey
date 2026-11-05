@@ -4,24 +4,29 @@
 
 flipkey fixes words you typed in the wrong keyboard layout on macOS, the way Punto Switcher does.
 Type `ghbdtn`, press Space, and it becomes `привет`. It works in both directions, Russian and English.
+While it runs, an A⇄Я icon sits in the menu bar; click it for About or Quit.
 
-When you press Space, Enter or Tab, flipkey checks the last word with the macOS spell checker.
-If the word is not valid in the current layout but is valid in the other one, flipkey retypes it and switches the layout.
+When you press Space, Enter or Tab, flipkey looks at the last word in both layouts.
+If the word looks wrong in the current layout but is a real word in the other one, flipkey retypes it and switches the layout.
+Short words typed just before it in the same wrong layout get fixed too, so `b lfdfq` becomes `и давай`.
 
-## Build and run
+A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.
+The vowel rule matters because the spell checker slowly learns words you type often, including mistyped ones like `ghbdtn`.
+
+## Install
+
+Download `flipkey-<version>.zip` from Releases, unzip it, and move `flipkey.app` to Applications.
+The app is not notarized yet, so open it the first time with right-click > Open.
+Then allow it in System Settings > Privacy & Security > Accessibility. It starts working as soon as you allow it.
+
+## Build
 
 ```bash
-swiftc -O -o flipkey main.swift
-./flipkey
+./build.sh 0.1    # runs the self-test, then builds build/flipkey.app and build/flipkey-0.1.zip
 ```
 
-On the first run, macOS asks for Accessibility access. Allow it for your terminal (or the `flipkey` binary) in System Settings > Privacy & Security > Accessibility, then run it again.
-
-To check the conversion logic without any permissions, run:
-
-```bash
-swiftc -Onone -o flipkey main.swift && ./flipkey --selftest
-```
+The app runs on macOS 13 or later, on both Apple Silicon and Intel.
+Each build has a new ad-hoc signature, so macOS asks for Accessibility access again after an update.
 
 ## Limits
 
@@ -29,3 +34,4 @@ swiftc -Onone -o flipkey main.swift && ./flipkey --selftest
 - It has no hotkey to undo or convert a word by hand.
 - It ignores `ё` and Russian punctuation keys.
 - It leaves alone words the spell checker doesn't know, such as names and slang.
+- A short word on its own, like `b` for `и`, is too ambiguous to fix; it is fixed only together with the next word.

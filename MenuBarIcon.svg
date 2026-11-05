@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 36" width="60" height="36">
+  <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-weight="700" font-size="24" text-anchor="middle" fill="#000">
+    <text x="12" y="27">A</text>
+    <text x="48" y="27">Я</text>
+  </g>
+  <g fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 12 H37 M33 8 L37 12 L33 16"/>
+    <path d="M37 24 H23 M27 20 L23 24 L27 28"/>
+  </g>
+</svg>

@@ -13,11 +13,15 @@ let keys: [Int64: (String, String, String)] = [
     0x07: ("x", "X", "ч"), 0x08: ("c", "C", "с"), 0x09: ("v", "V", "м"), 0x0B: ("b", "B", "и"),
     0x2D: ("n", "N", "т"), 0x2E: ("m", "M", "ь"), 0x2B: (",", "<", "б"), 0x2F: (".", ">", "ю"),
 ]
-let backspace: Int64 = 0x33, boundaries: Set<Int64> = [0x31, 0x24, 0x30]  // space, return, tab
+let backspace: Int64 = 0x33, space: Int64 = 0x31, boundaries: Set<Int64> = [space, 0x24, 0x30]  // + return, tab
+// The spell checker accepts any single letter, so one-letter words need an explicit list.
+let oneLetterWords = ["ru": Set("авикосуяАВИКОСУЯ".map(String.init)), "en": ["a", "A", "I"]]
+let vowels = ["ru": Set("аеёиоуыэюяАЕЁИОУЫЭЮЯ"), "en": Set("aeiouyAEIOUY")]
 let magic: Int64 = 0x50554E54  // marks our own synthetic events so the tap skips them
 
 struct Key { let code: Int64; let shift: Bool }
 var word: [Key] = []
+var prev: (lang: String?, words: [[Key]]) = (nil, [])  // words just before `word`, same layout, not converted
 var tap: CFMachPort?
 
 func text(_ word: [Key], ru: Bool) -> String {
@@ -28,16 +32,34 @@ func text(_ word: [Key], ru: Bool) -> String {
 }
 
 func isWord(_ s: String, _ lang: String) -> Bool {
-    NSSpellChecker.shared.checkSpelling(
+    if s.count == 1 { return oneLetterWords[lang]!.contains(s) }
+    return NSSpellChecker.shared.checkSpelling(
         of: s, startingAt: 0, language: lang, wrap: false, inSpellDocumentWithTag: 0, wordCount: nil
     ).location == NSNotFound
 }
 
-// Converts only when the typed text is not a word but the other layout's text is.
+// The spell checker learns words typed often, so a long-mistyped "ghbdtn" can pass; no vowels still means wrong.
+func looksWrong(_ s: String, _ lang: String) -> Bool {
+    !isWord(s, lang) || (s.count > 1 && !s.contains(where: vowels[lang]!.contains))
+}
+
+// Converts only when the typed text looks wrong but the other layout's text is a word.
 func converted(_ word: [Key], currentRu: Bool) -> String? {
-    guard word.count >= 2 else { return nil }
     let cur = text(word, ru: currentRu), other = text(word, ru: !currentRu)
-    return !isWord(cur, currentRu ? "ru" : "en") && isWord(other, currentRu ? "en" : "ru") ? other : nil
+    return looksWrong(cur, currentRu ? "ru" : "en") && isWord(other, currentRu ? "en" : "ru") ? other : nil
+}
+
+// Fixes the word plus the words right before it that were typed in the same wrong layout,
+// so "b ghbdtn" becomes "и привет". A lone short word is too ambiguous to fix on its own.
+func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
+    guard word.count >= 2, let fix = converted(word, currentRu: ru) else { return nil }
+    var words = [fix], erase = word.count
+    for p in prev.reversed() {
+        guard let f = converted(p, currentRu: ru) else { break }
+        words.insert(f, at: 0)
+        erase += p.count + 1  // + the space after it
+    }
+    return (erase, words.joined(separator: " "))
 }
 
 func lang(_ s: TISInputSource) -> String? {
@@ -71,7 +93,7 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         return pass
     }
     guard type == .keyDown, event.getIntegerValueField(.eventSourceUserData) != magic else {
-        if type == .leftMouseDown { word = [] }  // caret moved, the buffer no longer matches the screen
+        if type == .leftMouseDown { word = []; prev.words = [] }  // caret moved, the buffer no longer matches the screen
         return pass
     }
     let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
@@ -80,17 +102,22 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         return pass
     }
     if code == backspace, flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
-        if !word.isEmpty { word.removeLast() }
+        if word.isEmpty { prev.words = [] } else { word.removeLast() }
         return pass
     }
     defer { word = [] }
     let current = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue())
-    guard boundaries.contains(code), current == "ru" || current == "en",
-          let fix = converted(word, currentRu: current == "ru") else { return pass }
+    if prev.lang != current { prev = (current, []) }
+    guard boundaries.contains(code), current == "ru" || current == "en" else { prev.words = []; return pass }
+    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru") else {
+        prev.words = code == space && !word.isEmpty ? Array((prev.words + [word]).suffix(5)) : []
+        return pass
+    }
+    prev.words = []
     // Swallow the boundary key and replay it after the fix so the order on screen stays right.
-    for _ in word { post(CGKeyCode(backspace)) }
+    for _ in 0..<fix.erase { post(CGKeyCode(backspace)) }
     select(lang: current == "ru" ? "en" : "ru")
-    for ch in fix { post(0, String(ch)) }  // one char per event: some apps drop longer unicode strings
+    for ch in fix.text { post(0, String(ch)) }  // one char per event: some apps drop longer unicode strings
     post(CGKeyCode(code))
     return nil
 }
@@ -102,14 +129,17 @@ if CommandLine.arguments.contains("--selftest") {
     assert(converted(typed("hello"), currentRu: false) == nil)
     assert(converted(typed("hello"), currentRu: true) == "hello")  // typed as "руддщ"
     assert(converted(typed("vbh"), currentRu: true) == nil)  // "мир" is a real word
+    assert(fixPhrase([], typed("b"), currentRu: false) == nil)  // lone "и" is too ambiguous
+    assert(fixPhrase([typed("b")], typed("ghbdtn"), currentRu: false)! == (8, "и привет"))
+    assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (6, "в доме"))
     print("selftest ok")
     exit(0)
 }
 
 let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-guard AXIsProcessTrustedWithOptions(prompt) else {
-    print("Grant Accessibility access in System Settings > Privacy & Security, then run again.")
-    exit(1)
+if !AXIsProcessTrustedWithOptions(prompt) {
+    print("Waiting for Accessibility access in System Settings > Privacy & Security...")
+    while !AXIsProcessTrusted() { sleep(1) }  // no relaunch needed once the user allows it
 }
 let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
 tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -121,10 +151,7 @@ final class Actions: NSObject {
     @objc func about() {
         let repo = "https://github.com/puchkoff/flipkey"
         NSApp.activate(ignoringOtherApps: true)  // a menu bar app's panel opens behind other windows otherwise
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "flipkey",
-            .applicationVersion: "0.1",
-            .applicationIcon: NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)!,
+        NSApp.orderFrontStandardAboutPanel(options: [  // name, version and icon come from the .app bundle
             .credits: NSAttributedString(
                 string: "Fixes words typed in the wrong keyboard layout (Russian ⇄ English).\n\(repo)",
                 attributes: [.link: URL(string: repo)!]),
@@ -136,7 +163,10 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
 let actions = Actions()
 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-item.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "flipkey")
+let icon = Bundle.main.image(forResource: "MenuBarIcon")  // nil when run as a bare binary, not the .app
+icon?.size = NSSize(width: 30, height: 18)
+icon?.isTemplate = true  // macOS tints it for light and dark menu bars
+item.button?.image = icon ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "flipkey")
 item.menu = NSMenu()
 item.menu?.addItem(withTitle: "About flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
 item.menu?.addItem(.separator())
