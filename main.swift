@@ -34,6 +34,21 @@ let enToRu = Dictionary(uniqueKeysWithValues: keys.values.flatMap {
     [(Character($0.0), Character($0.2)), (Character($0.1), Character($0.2.uppercased()))]
 })
 let ruToEn = Dictionary(uniqueKeysWithValues: enToRu.map { ($1, $0) })
+
+// Real key codes for retyped text, since some apps (remote desktops, VMs) read the code and ignore the string.
+let usExtra: [Int64: (String, String)] = [
+    0x12: ("1", "!"), 0x13: ("2", "@"), 0x14: ("3", "#"), 0x15: ("4", "$"), 0x17: ("5", "%"), 0x16: ("6", "^"),
+    0x1A: ("7", "&"), 0x1C: ("8", "*"), 0x19: ("9", "("), 0x1D: ("0", ")"), 0x1B: ("-", "_"), 0x18: ("=", "+"),
+    0x2C: ("/", "?"), 0x2A: ("\\", "|"), 0x32: ("`", "~"), 0x31: (" ", " "),
+]
+let keyFor: [Character: (code: Int64, shift: Bool)] = {
+    var m: [Character: (code: Int64, shift: Bool)] = [:]
+    for (c, t) in usExtra { m[Character(t.1)] = (c, true); m[Character(t.0)] = (c, false) }  // unshifted space wins
+    for (c, t) in keys {
+        for (s, shift) in [(t.0, false), (t.1, true), (t.2, false), (t.2.uppercased(), true)] { m[Character(s)] = (c, shift) }
+    }
+    return m
+}()
 func swapLayout(_ s: String, toRu: Bool) -> String { String(s.map { (toRu ? enToRu : ruToEn)[$0] ?? $0 }) }
 
 func text(_ word: [Key], ru: Bool) -> String {
@@ -127,7 +142,9 @@ func typeText(_ s: String) {
         switch ch {
         case "\n": post(CGKeyCode(returnKey))  // a typed newline character isn't Return in every app
         case "\t": post(CGKeyCode(tabKey))
-        default: post(0, String(ch))
+        default:
+            let k = keyFor[ch]  // unknown signs keep code 0; apps that read the string still get them right
+            post(CGKeyCode(k?.code ?? 0), String(ch), flags: k?.shift == true ? .maskShift : [])
         }
     }
 }
@@ -275,6 +292,7 @@ if CommandLine.arguments.contains("--selftest") {
     assert(swapLayout("ghbdtn", toRu: true) == "привет")
     assert(swapLayout("Руддщб", toRu: false) == "Hello,")
     assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo
+    assert(keyFor["П"]! == (0x05, true) && keyFor["?"]! == (0x2C, true) && keyFor[" "]! == (0x31, false))
     print("selftest ok")
     exit(0)
 }
