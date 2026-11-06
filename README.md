@@ -8,9 +8,10 @@ While it runs, an A⇄Я icon sits in the menu bar; click it for About or Quit.
 
 When you press Space, Enter, Tab or a sign like `?` or `!`, Flipkey looks at the last word in both layouts.
 If the word looks wrong in the current layout but is a real word in the other one, Flipkey retypes it and switches the layout.
+It switches to the layout you last used for that language, so it keeps ABC or U.S., Russian or Russian – PC, as you had them.
 Short words typed just before it in the same wrong layout get fixed too, so `b lfdfq` becomes `и давай`.
 
-Press Shift twice quickly to:
+Tap Shift twice quickly (a Shift you hold or use with a click doesn't count) to:
 
 - undo the last fix, right after it happened, if Flipkey got it wrong;
 - convert the word you are typing, or the last word if Flipkey left it alone (a name, slang), together with short words like `b` (и) typed before it in the same wrong layout; press again to flip it back;

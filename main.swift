@@ -26,7 +26,8 @@ var tap: CFMachPort?
 // Text typed after the word ("?", " ") is kept in `tail` so double Shift can erase and retype it.
 var lastFix: (text: String, tail: String, lang: String)?  // what double Shift undoes
 var lastWord: (keys: [Key], tail: String, lang: String, before: [[Key]])?  // last word left as typed; double Shift converts it
-var shiftClean = false, lastShiftTap = Date.distantPast  // a "tap" is a Shift press with no other key in between
+var shiftClean = false, shiftDown = Date.distantPast, lastShiftTap = Date.distantPast  // a "tap" is a quick Shift press with no other key in between
+var sources: [String: TISInputSource] = [:]  // the layout last used for each language, so a fix switches back to it
 
 // Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
 let enToRu = Dictionary(uniqueKeysWithValues: keys.values.flatMap {
@@ -93,7 +94,16 @@ func lang(_ s: TISInputSource) -> String? {
     return (Unmanaged<CFArray>.fromOpaque(p).takeUnretainedValue() as? [String])?.first
 }
 
+// The current layout's language; also remembers the layout, since a language can have several (ABC, U.S.).
+func currentLang() -> String? {
+    let s = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+    let l = lang(s)
+    if let l { sources[l] = s }
+    return l
+}
+
 func select(lang wanted: String) {
+    if let s = sources[wanted] { TISSelectInputSource(s); return }
     let filter = [
         kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String,
         kTISPropertyInputSourceIsSelectCapable as String: true,
@@ -158,7 +168,7 @@ func convertSelection() {
 // Undo the last fix, else convert the word being typed or the last word, else convert the selection.
 // The word takes along the short words before it typed in the same wrong layout, so "b pf" becomes "и за".
 func onDoubleShift() {
-    if !word.isEmpty, let cur = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) {
+    if !word.isEmpty, let cur = currentLang() {
         lastWord = (word, "", cur, prev.lang == cur ? prev.words : []); word = []; prev.words = []; lastFix = nil
     }
     if let f = lastFix {
@@ -183,8 +193,10 @@ func onFlagsChanged(_ event: CGEvent) {
     guard code == 56 || code == 60 else { shiftClean = false; return }  // left or right Shift
     if flags.contains(.maskShift) {
         shiftClean = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+        shiftDown = Date()
     } else if shiftClean {
         shiftClean = false
+        guard Date().timeIntervalSince(shiftDown) < 0.3 else { lastShiftTap = .distantPast; return }  // a held Shift isn't a tap
         if Date().timeIntervalSince(lastShiftTap) < 0.4 { lastShiftTap = .distantPast; onDoubleShift() }
         else { lastShiftTap = Date() }
     }
@@ -200,7 +212,8 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     if type == .flagsChanged { onFlagsChanged(event) }
     guard type == .keyDown else {
         // A click moves the caret, so the buffers no longer match the screen.
-        if type == .leftMouseDown { word = []; prev.words = []; lastFix = nil; lastWord = nil }
+        // Shift+click selects text, so that Shift press isn't a tap either.
+        if type == .leftMouseDown { word = []; prev.words = []; lastFix = nil; lastWord = nil; shiftClean = false }
         return pass
     }
     shiftClean = false; lastShiftTap = .distantPast
@@ -217,7 +230,7 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         return pass
     }
     defer { word = [] }
-    let current = lang(TISCopyCurrentKeyboardInputSource().takeRetainedValue())
+    let current = currentLang()
     if prev.lang != current { prev = (current, []) }
     // Space, Return, Tab or any printed sign like "?" ends the word.
     let tail = code == returnKey ? "\n" : code == tabKey ? "\t" : printable(event)
