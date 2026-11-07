@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 400" width="660" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="660" height="400" fill="url(#bg)"/>
+  <text x="330" y="62" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="22" font-weight="600"
+        fill="#1e293b" text-anchor="middle">Drag Flipkey to Applications</text>
+  <g fill="none" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M262 190 Q330 150 398 190"/>
+    <path d="M378 170 L400 192 L372 200"/>
+  </g>
+  <text x="330" y="318" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13"
+        fill="#64748b" text-anchor="middle">Then open Flipkey and allow it in Privacy &amp; Security → Accessibility</text>
+</svg>

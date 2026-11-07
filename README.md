@@ -22,17 +22,19 @@ The vowel rule matters because the spell checker slowly learns words you type of
 
 ## Install
 
-Download `Flipkey-<version>.zip` from Releases, unzip it, and move `Flipkey.app` to Applications.
+Download `Flipkey-<version>.dmg` from Releases, open it, and drag Flipkey to Applications.
+A `.zip` with the same app is there too.
 The app is not notarized yet, so open it the first time with right-click > Open.
 Then allow it in System Settings > Privacy & Security > Accessibility. It starts working as soon as you allow it.
 
 ## Build
 
 ```bash
-./build.sh 0.1    # runs the self-test, then builds build/Flipkey.app and build/Flipkey-0.1.zip
+./build.sh 0.1    # runs the self-test, then builds build/Flipkey.app, build/Flipkey-0.1.zip and build/Flipkey-0.1.dmg
 ```
 
 The app runs on macOS 13 or later, on both Apple Silicon and Intel.
+The DMG needs `brew install create-dmg`. Its window background is `DmgBackground.svg`.
 If your keychain has a code-signing certificate named "Flipkey Dev", the build signs with it, and the Accessibility grant survives rebuilds.
 Without it the build is ad-hoc signed, and macOS silently drops the grant after every rebuild.
 

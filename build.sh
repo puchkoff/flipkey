@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds build/Flipkey.app (Apple Silicon + Intel, macOS 13+) and build/Flipkey-<version>.zip.
+# Builds build/Flipkey.app (Apple Silicon + Intel, macOS 13+), build/Flipkey-<version>.zip and .dmg.
 set -e
 VERSION=${1:-0.1}
 cd "$(dirname "$0")"
@@ -40,4 +40,14 @@ PLIST
 IDENTITY=$(security find-identity -p codesigning | grep -q '"Flipkey Dev"' && echo "Flipkey Dev" || echo -)
 codesign --force --sign "$IDENTITY" $APP
 ditto -c -k --keepParent $APP build/Flipkey-$VERSION.zip
-echo "Built $APP and build/Flipkey-$VERSION.zip"
+
+# The DMG window: app on the left, an arrow, Applications on the right. Needs `brew install create-dmg`;
+# it lays out the window through Finder, so the first run asks to allow controlling Finder.
+build/render DmgBackground.svg build/dmg-bg.png 660 400
+build/render DmgBackground.svg build/dmg-bg@2x.png 1320 800
+tiffutil -cathidpicheck build/dmg-bg.png build/dmg-bg@2x.png -out build/dmg-bg.tiff  # sharp on Retina
+mkdir build/dmg && cp -R $APP build/dmg/
+create-dmg --volname Flipkey --volicon $APP/Contents/Resources/AppIcon.icns --background build/dmg-bg.tiff \
+  --window-size 660 400 --icon-size 128 --icon Flipkey.app 165 190 --hide-extension Flipkey.app \
+  --app-drop-link 495 190 --no-internet-enable build/Flipkey-$VERSION.dmg build/dmg >/dev/null
+echo "Built $APP, build/Flipkey-$VERSION.zip and build/Flipkey-$VERSION.dmg"
