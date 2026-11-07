@@ -205,6 +205,14 @@ func onDoubleShift() {
     }
 }
 
+// Backspace erases the word being typed first, then the text after the last fix or word, then that fix or word.
+func onBackspace() {
+    if !word.isEmpty { word.removeLast(); return }
+    prev.words = []
+    if lastFix?.tail.isEmpty == false { lastFix!.tail.removeLast() } else { lastFix = nil }
+    if lastWord?.tail.isEmpty == false { lastWord!.tail.removeLast() } else { lastWord = nil }
+}
+
 func onFlagsChanged(_ event: CGEvent) {
     let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
     guard code == 56 || code == 60 else { shiftClean = false; return }  // left or right Shift
@@ -237,13 +245,12 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     let code = event.getIntegerValueField(.keyboardEventKeycode), flags = event.flags
     let plain = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
     if plain, keys[code] != nil {
+        // lastFix and lastWord stay: if this word is erased again, double Shift still reaches them.
         word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift)))
-        lastFix = nil; lastWord = nil
         return pass
     }
     if code == backspace, flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
-        if word.isEmpty { prev.words = [] } else { word.removeLast() }
-        lastFix = nil; lastWord = nil
+        onBackspace()
         return pass
     }
     defer { word = [] }
@@ -293,6 +300,14 @@ if CommandLine.arguments.contains("--selftest") {
     assert(swapLayout("Руддщб", toRu: false) == "Hello,")
     assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo
     assert(keyFor["П"]! == (0x05, true) && keyFor["?"]! == (0x2C, true) && keyFor[" "]! == (0x31, false))
+    // "Vfif " left alone, then "abc" typed and erased: double Shift must still reach "Vfif".
+    lastWord = (typed("vfif"), " ", "en", []); word = typed("ab")
+    onBackspace(); onBackspace()
+    assert(lastWord?.tail == " ")
+    onBackspace()  // the space
+    assert(lastWord?.tail == "")
+    onBackspace()  // into the word itself, so it no longer matches the screen
+    assert(lastWord == nil)
     print("selftest ok")
     exit(0)
 }
