@@ -107,20 +107,6 @@ func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: In
     }
 }
 
-// Mid-word fix: no word in this layout starts like this, but some word in the other one does.
-let earlyAfter = 4  // shorter prefixes are too ambiguous
-func hasCompletions(_ s: String, _ lang: String) -> Bool {
-    !(NSSpellChecker.shared.completions(
-        forPartialWordRange: NSRange(location: 0, length: (s as NSString).length), in: s, language: lang,
-        inSpellDocumentWithTag: 0
-    ) ?? []).isEmpty
-}
-func earlyFix(_ word: [Key], currentRu ru: Bool) -> String? {
-    guard word.count >= earlyAfter else { return nil }
-    let cur = text(word, ru: ru), other = text(word, ru: !ru)
-    return !hasCompletions(cur, ru ? "ru" : "en") && hasCompletions(other, ru ? "en" : "ru") ? other : nil
-}
-
 func learnKey(_ w: [Key], _ lang: String) -> String { lang + ":" + text(w, ru: lang == "ru").lowercased() }
 func saveLearned() { UserDefaults.standard.set(learned, forKey: "learned") }
 func learn(_ w: [Key], _ lang: String) { learn(key: learnKey(w, lang)) }
@@ -278,15 +264,8 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     let plain = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
     if plain, keys[code] != nil {
         // lastFix and lastWord stay: if this word is erased again, double Shift still reaches them.
+        // No mid-word switch: prefix guesses were wrong too often; the word is fixed when it ends.
         word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift)))
-        // Swallow this key and retype the whole word so far in the other layout; typing goes on there.
-        if let cur = currentLang(), cur == "ru" || cur == "en", let fix = earlyFix(word, currentRu: cur == "ru") {
-            erase(word.count - 1)
-            select(lang: cur == "ru" ? "en" : "ru")
-            typeText(fix)
-            prev.words = []; lastFix = nil; lastWord = nil
-            return nil
-        }
         return pass
     }
     if code == backspace, flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
@@ -337,10 +316,6 @@ if CommandLine.arguments.contains("--selftest") {
     assert(fixPhrase([], typed("k.,k."), currentRu: false)! == (5, "люблю"))  // here "," and "." are letters
     assert(wrongBefore([typed("hello"), typed("pf"), typed("b")], currentRu: false) == (5, "за и "))  // double Shift on "b pf"
     assert(wrongBefore([typed("hello")], currentRu: false) == (0, ""))
-    assert(earlyFix(typed("ghbd"), currentRu: false) == "прив")
-    assert(earlyFix(typed("ghb"), currentRu: false) == nil)  // too short
-    assert(earlyFix(typed("hell"), currentRu: false) == nil)
-    assert(earlyFix(typed("hell"), currentRu: true) == "hell")  // typed as "рудд"
     assert(swapLayout("ghbdtn", toRu: true) == "привет")
     assert(swapLayout("Руддщб", toRu: false) == "Hello,")
     assert(swapLayout("и привет", toRu: false) == "b ghbdtn")  // what double Shift retypes on undo
