@@ -28,6 +28,9 @@ var lastFix: (text: String, tail: String, lang: String)?  // what double Shift u
 var lastWord: (keys: [Key], tail: String, lang: String, before: [[Key]])?  // last word left as typed; double Shift converts it
 var shiftClean = false, shiftDown = Date.distantPast, lastShiftTap = Date.distantPast  // a "tap" is a quick Shift press with no other key in between
 var sources: [String: TISInputSource] = [:]  // the layout last used for each language, so a fix switches back to it
+// Words converted by hand with double Shift, keyed "lang:typed text", with how many times.
+var learned = UserDefaults.standard.dictionary(forKey: "learned") as? [String: Int] ?? [:]
+let learnAfter = 2  // converted by hand this many times -> converted automatically
 
 // Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
 let enToRu = Dictionary(uniqueKeysWithValues: keys.values.flatMap {
@@ -102,6 +105,13 @@ func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: In
         tail = text([k], ru: false) + tail
         core.removeLast()
     }
+}
+
+func learnKey(_ w: [Key], _ lang: String) -> String { lang + ":" + text(w, ru: lang == "ru").lowercased() }
+func saveLearned() { UserDefaults.standard.set(learned, forKey: "learned") }
+func learn(_ w: [Key], _ lang: String) { learned[learnKey(w, lang), default: 0] += 1; saveLearned() }
+func learnedFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
+    (learned[learnKey(w, ru ? "ru" : "en")] ?? 0) >= learnAfter ? (w.count, text(w, ru: !ru)) : nil
 }
 
 func lang(_ s: TISInputSource) -> String? {
@@ -195,6 +205,7 @@ func onDoubleShift() {
         typeText(swapLayout(f.text, toRu: f.lang == "ru") + f.tail)
     } else if let w = lastWord {
         lastWord = nil
+        learn(w.keys, w.lang)
         let ru = w.lang == "ru", b = wrongBefore(w.before, currentRu: ru), fixed = b.text + text(w.keys, ru: !ru)
         erase(b.erase + w.keys.count + w.tail.count)
         select(lang: ru ? "en" : "ru")
@@ -268,7 +279,8 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         prev.words = []  // the next word is no longer one space away from these
         return pass
     }
-    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru") else {
+    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru")
+            ?? learnedFix(word, currentRu: current == "ru") else {
         lastWord = (word, tail, current, prev.words); lastFix = nil
         prev.words = tail == " " ? Array((prev.words + [word]).suffix(5)) : []
         return pass
@@ -308,11 +320,33 @@ if CommandLine.arguments.contains("--selftest") {
     assert(lastWord?.tail == "")
     onBackspace()  // into the word itself, so it no longer matches the screen
     assert(lastWord == nil)
+    learned = [:]
+    assert(learnedFix(typed("nbgf"), currentRu: false) == nil)
+    learn(typed("nbgf"), "en"); learn(typed("nbgf"), "en")
+    assert(learnedFix(typed("nbgf"), currentRu: false)! == (4, "типа"))
     print("selftest ok")
     exit(0)
 }
 
-final class Actions: NSObject {
+final class Actions: NSObject, NSMenuDelegate {
+    // Rebuilt on every open so it shows the current list.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let words = learned.filter { $0.value >= learnAfter }.keys.sorted()
+        for k in words {
+            let lang = String(k.prefix(2)), typed = String(k.dropFirst(3))
+            let i = menu.addItem(withTitle: "\(typed) → \(swapLayout(typed, toRu: lang == "en"))  (remove)",
+                                 action: #selector(forget(_:)), keyEquivalent: "")
+            i.target = self; i.representedObject = k
+        }
+        if words.isEmpty { menu.addItem(withTitle: "No learned words yet", action: nil, keyEquivalent: "").isEnabled = false }
+        menu.addItem(.separator())
+        let clear = menu.addItem(withTitle: "Clear All", action: #selector(clearAll), keyEquivalent: "")
+        clear.target = self; clear.isEnabled = !learned.isEmpty
+    }
+    @objc func forget(_ sender: NSMenuItem) { learned[sender.representedObject as! String] = nil; saveLearned() }
+    @objc func clearAll() { learned = [:]; saveLearned() }
+
     @objc func about() {
         let repo = "https://github.com/puchkoff/flipkey"
         NSApp.activate(ignoringOtherApps: true)  // a menu bar app's panel opens behind other windows otherwise
@@ -339,6 +373,10 @@ icon?.isTemplate = true  // macOS tints it for light and dark menu bars
 item.button?.image = icon ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Flipkey")
 item.menu = NSMenu()
 item.menu?.addItem(withTitle: "About Flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
+let learnedMenu = NSMenu()
+learnedMenu.delegate = actions
+learnedMenu.autoenablesItems = false
+item.menu?.addItem(withTitle: "Learned Words", action: nil, keyEquivalent: "").submenu = learnedMenu
 item.menu?.addItem(.separator())
 item.menu?.addItem(withTitle: "Quit Flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
