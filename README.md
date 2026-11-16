@@ -17,7 +17,7 @@ Tap Shift twice quickly (a Shift you hold or use with a click doesn't count) to:
 - convert the word you are typing, or the last word if Flipkey left it alone (a name, slang), together with short words like `b` (и) typed before it in the same wrong layout; press again to flip it back;
 - with text selected, retype the selection in the other layout and switch to that layout.
 
-If you convert the same word by hand with double Shift twice, Flipkey learns it and fixes it automatically from then on.
+If you convert the same word by hand with double Shift twice (typed or selected), Flipkey learns it and fixes it automatically from then on.
 The menu bar icon > Learned Words lists these words; click one to forget it, or use Clear All.
 
 A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.

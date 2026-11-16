@@ -109,7 +109,13 @@ func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: In
 
 func learnKey(_ w: [Key], _ lang: String) -> String { lang + ":" + text(w, ru: lang == "ru").lowercased() }
 func saveLearned() { UserDefaults.standard.set(learned, forKey: "learned") }
-func learn(_ w: [Key], _ lang: String) { learned[learnKey(w, lang), default: 0] += 1; saveLearned() }
+func learn(_ w: [Key], _ lang: String) { learn(key: learnKey(w, lang)) }
+func learn(key: String) { learned[key, default: 0] += 1; saveLearned() }
+// A selection is learned only when it is one word made of layout keys, so it matches what typing produces.
+func learn(selection sel: String, fromRu ru: Bool) {
+    guard !sel.isEmpty, sel.allSatisfy({ (ru ? ruToEn : enToRu)[$0] != nil }) else { return }
+    learn(key: (ru ? "ru:" : "en:") + sel.lowercased())
+}
 func learnedFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
     (learned[learnKey(w, ru ? "ru" : "en")] ?? 0) >= learnAfter ? (w.count, text(w, ru: !ru)) : nil
 }
@@ -187,6 +193,7 @@ func convertSelection() {
         // shortcut: apps that copy the whole line with no selection (VS Code) get that line inserted; detect via AX if it bites.
         guard let sel = pb.string(forType: .string), !sel.isEmpty else { return }
         let toRu = !sel.contains { ruToEn[$0] != nil }
+        learn(selection: sel, fromRu: !toRu)
         typeText(swapLayout(sel, toRu: toRu))
         select(lang: toRu ? "ru" : "en")
     }
@@ -324,6 +331,12 @@ if CommandLine.arguments.contains("--selftest") {
     assert(learnedFix(typed("nbgf"), currentRu: false) == nil)
     learn(typed("nbgf"), "en"); learn(typed("nbgf"), "en")
     assert(learnedFix(typed("nbgf"), currentRu: false)! == (4, "типа"))
+    learned = [:]
+    learn(selection: "Nbgf", fromRu: false); learn(selection: "nbgf", fromRu: false)
+    assert(learnedFix(typed("nbgf"), currentRu: false)! == (4, "типа"))
+    learn(selection: "b ghbdtn", fromRu: false)  // several words: not learned
+    assert(learned["en:b ghbdtn"] == nil)
+    learned = [:]
     print("selftest ok")
     exit(0)
 }
