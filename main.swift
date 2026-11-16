@@ -367,48 +367,60 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
-final class FlippedView: NSView { override var isFlipped: Bool { true } }  // lists grow downward from the top
-
-final class Actions: NSObject {
+final class Actions: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var window: NSWindow?
+    let table = NSTableView()
+    let clear = NSButton(title: "Clear All", target: nil, action: nil)
+    var words: [String] = []
     @objc func showLearned() {
         if window == nil {
-            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 320),
+            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 340),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             window?.title = "Learned Words"
             window?.isReleasedWhenClosed = false
+            for (id, title) in [("typed", "Typed"), ("fixed", "Becomes"), ("remove", "")] {
+                let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+                col.title = title
+                if id == "remove" { col.width = 28; col.minWidth = 28; col.maxWidth = 28 }
+                table.addTableColumn(col)
+            }
+            table.style = .inset
+            table.usesAlternatingRowBackgroundColors = true
+            table.rowHeight = 26
+            table.dataSource = self; table.delegate = self
+            let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.documentView = table
+            clear.target = self; clear.action = #selector(clearAll)
+            let content = NSStackView(views: [scroll, clear])
+            content.orientation = .vertical; content.alignment = .trailing
+            content.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 12, right: 16)
+            scroll.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+            window?.contentView = content
             window?.center()
         }
         reloadLearned()
         NSApp.activate(ignoringOtherApps: true)  // a menu bar app's window opens behind other windows otherwise
         window?.makeKeyAndOrderFront(nil)
     }
-    // Rebuilt after every change so it shows the current list.
     func reloadLearned() {
-        let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading
-        let words = learned.filter { $0.value >= learnAfter }.keys.sorted()
-        for k in words {
-            let lang = String(k.prefix(2)), typed = String(k.dropFirst(3))
-            let remove = NSButton(title: "Remove", target: self, action: #selector(forget(_:)))
-            remove.identifier = NSUserInterfaceItemIdentifier(k)
-            rows.addArrangedSubview(NSStackView(views: [
-                NSTextField(labelWithString: "\(typed) → \(swapLayout(typed, toRu: lang == "en"))"), remove]))
-        }
-        if words.isEmpty { rows.addArrangedSubview(NSTextField(labelWithString: "No learned words yet")) }
-        let clear = NSButton(title: "Clear All", target: self, action: #selector(clearAll))
+        words = learned.filter { $0.value >= learnAfter }.keys.sorted()
         clear.isEnabled = !learned.isEmpty
-        rows.addArrangedSubview(clear)
-        rows.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true
-        let flipped = FlippedView(); flipped.addSubview(rows)
-        rows.translatesAutoresizingMaskIntoConstraints = false
-        flipped.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = flipped
-        NSLayoutConstraint.activate([
-            rows.topAnchor.constraint(equalTo: flipped.topAnchor), rows.bottomAnchor.constraint(equalTo: flipped.bottomAnchor),
-            rows.leadingAnchor.constraint(equalTo: flipped.leadingAnchor), rows.trailingAnchor.constraint(equalTo: flipped.trailingAnchor),
-            flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)])
-        window?.contentView = scroll
+        table.reloadData()
+    }
+    func numberOfRows(in tableView: NSTableView) -> Int { words.count }
+    func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
+        let k = words[row], typed = String(k.dropFirst(3))
+        switch column?.identifier.rawValue {
+        case "typed":
+            let l = NSTextField(labelWithString: typed); l.textColor = .secondaryLabelColor; return l
+        case "fixed":
+            let l = NSTextField(labelWithString: swapLayout(typed, toRu: k.hasPrefix("en")))
+            l.font = .boldSystemFont(ofSize: NSFont.systemFontSize); return l
+        default:
+            let b = NSButton(image: NSImage(systemSymbolName: "trash", accessibilityDescription: "Remove")!,
+                             target: self, action: #selector(forget(_:)))
+            b.isBordered = false; b.contentTintColor = .secondaryLabelColor; b.toolTip = "Remove"
+            b.identifier = NSUserInterfaceItemIdentifier(k); return b
+        }
     }
     @objc func forget(_ sender: NSButton) { learned[sender.identifier!.rawValue] = nil; saveLearned(); reloadLearned() }
     @objc func clearAll() { learned = [:]; saveLearned(); reloadLearned() }
