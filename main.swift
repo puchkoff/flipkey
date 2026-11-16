@@ -341,24 +341,51 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
-final class Actions: NSObject, NSMenuDelegate {
-    // Rebuilt on every open so it shows the current list.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
+final class FlippedView: NSView { override var isFlipped: Bool { true } }  // lists grow downward from the top
+
+final class Actions: NSObject {
+    var window: NSWindow?
+    @objc func showLearned() {
+        if window == nil {
+            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 320),
+                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            window?.title = "Learned Words"
+            window?.isReleasedWhenClosed = false
+            window?.center()
+        }
+        reloadLearned()
+        NSApp.activate(ignoringOtherApps: true)  // a menu bar app's window opens behind other windows otherwise
+        window?.makeKeyAndOrderFront(nil)
+    }
+    // Rebuilt after every change so it shows the current list.
+    func reloadLearned() {
+        let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading
         let words = learned.filter { $0.value >= learnAfter }.keys.sorted()
         for k in words {
             let lang = String(k.prefix(2)), typed = String(k.dropFirst(3))
-            let i = menu.addItem(withTitle: "\(typed) → \(swapLayout(typed, toRu: lang == "en"))  (remove)",
-                                 action: #selector(forget(_:)), keyEquivalent: "")
-            i.target = self; i.representedObject = k
+            let remove = NSButton(title: "Remove", target: self, action: #selector(forget(_:)))
+            remove.identifier = NSUserInterfaceItemIdentifier(k)
+            rows.addArrangedSubview(NSStackView(views: [
+                NSTextField(labelWithString: "\(typed) → \(swapLayout(typed, toRu: lang == "en"))"), remove]))
         }
-        if words.isEmpty { menu.addItem(withTitle: "No learned words yet", action: nil, keyEquivalent: "").isEnabled = false }
-        menu.addItem(.separator())
-        let clear = menu.addItem(withTitle: "Clear All", action: #selector(clearAll), keyEquivalent: "")
-        clear.target = self; clear.isEnabled = !learned.isEmpty
+        if words.isEmpty { rows.addArrangedSubview(NSTextField(labelWithString: "No learned words yet")) }
+        let clear = NSButton(title: "Clear All", target: self, action: #selector(clearAll))
+        clear.isEnabled = !learned.isEmpty
+        rows.addArrangedSubview(clear)
+        rows.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true
+        let flipped = FlippedView(); flipped.addSubview(rows)
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        flipped.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = flipped
+        NSLayoutConstraint.activate([
+            rows.topAnchor.constraint(equalTo: flipped.topAnchor), rows.bottomAnchor.constraint(equalTo: flipped.bottomAnchor),
+            rows.leadingAnchor.constraint(equalTo: flipped.leadingAnchor), rows.trailingAnchor.constraint(equalTo: flipped.trailingAnchor),
+            flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)])
+        window?.contentView = scroll
     }
-    @objc func forget(_ sender: NSMenuItem) { learned[sender.representedObject as! String] = nil; saveLearned() }
-    @objc func clearAll() { learned = [:]; saveLearned() }
+    @objc func forget(_ sender: NSButton) { learned[sender.identifier!.rawValue] = nil; saveLearned(); reloadLearned() }
+    @objc func clearAll() { learned = [:]; saveLearned(); reloadLearned() }
 
     @objc func about() {
         let repo = "https://github.com/puchkoff/flipkey"
@@ -386,10 +413,7 @@ icon?.isTemplate = true  // macOS tints it for light and dark menu bars
 item.button?.image = icon ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Flipkey")
 item.menu = NSMenu()
 item.menu?.addItem(withTitle: "About Flipkey", action: #selector(Actions.about), keyEquivalent: "").target = actions
-let learnedMenu = NSMenu()
-learnedMenu.delegate = actions
-learnedMenu.autoenablesItems = false
-item.menu?.addItem(withTitle: "Learned Words", action: nil, keyEquivalent: "").submenu = learnedMenu
+item.menu?.addItem(withTitle: "Learned Words…", action: #selector(Actions.showLearned), keyEquivalent: "").target = actions
 item.menu?.addItem(.separator())
 item.menu?.addItem(withTitle: "Quit Flipkey", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 

@@ -18,7 +18,7 @@ Tap Shift twice quickly (a Shift you hold or use with a click doesn't count) to:
 - with text selected, retype the selection in the other layout and switch to that layout.
 
 If you convert the same word by hand with double Shift twice (typed or selected), Flipkey learns it and fixes it automatically from then on.
-The menu bar icon > Learned Words lists these words; click one to forget it, or use Clear All.
+The menu bar icon > Learned Words… opens a window with these words; remove one, or use Clear All.
 
 A word "looks wrong" when the macOS spell checker rejects it or when it has no vowels.
 The vowel rule matters because the spell checker slowly learns words you type often, including mistyped ones like `ghbdtn`.
