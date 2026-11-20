@@ -19,7 +19,7 @@ let oneLetterWords = ["ru": Set("авикосуяАВИКОСУЯ".map(String.in
 let vowels = ["ru": Set("аеёиоуыэюяАЕЁИОУЫЭЮЯ"), "en": Set("aeiouyAEIOUY")]
 let magic: Int64 = 0x50554E54  // marks our own synthetic events so the tap skips them
 
-struct Key { let code: Int64; let shift: Bool }
+struct Key { let code: Int64; let shift: Bool; var ru = false }  // ru: the layout this key was typed in
 var word: [Key] = []
 var prev: (lang: String?, words: [[Key]]) = (nil, [])  // words just before `word`, same layout, not converted
 var tap: CFMachPort?
@@ -105,6 +105,15 @@ func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: In
         tail = text([k], ru: false) + tail
         core.removeLast()
     }
+}
+
+// A word whose keys were typed in both layouts, e.g. when the layout switched mid-word, shows half in each script.
+// Retype it all in one layout: the one where it is a real word, else the layout it started in.
+func mixedFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String, ru: Bool)? {
+    guard let first = w.first, w.contains(where: { $0.ru != first.ru }) else { return nil }
+    var toRu = first.ru
+    if isWord(text(w, ru: ru), ru ? "ru" : "en") { toRu = ru } else if isWord(text(w, ru: !ru), ru ? "en" : "ru") { toRu = !ru }
+    return (w.count, text(w, ru: toRu), toRu)
 }
 
 func learnKey(_ w: [Key], _ lang: String) -> String { lang + ":" + text(w, ru: lang == "ru").lowercased() }
@@ -265,7 +274,8 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     if plain, keys[code] != nil {
         // lastFix and lastWord stay: if this word is erased again, double Shift still reaches them.
         // No mid-word switch: prefix guesses were wrong too often; the word is fixed when it ends.
-        word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift)))
+        word.append(Key(code: code, shift: flags.contains(.maskShift) != flags.contains(.maskAlphaShift),
+                        ru: currentLang() == "ru"))
         return pass
     }
     if code == backspace, flags.intersection([.maskCommand, .maskAlternate]).isEmpty {
@@ -286,6 +296,14 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         lastWord?.tail += tail
         prev.words = []  // the next word is no longer one space away from these
         return pass
+    }
+    if let m = mixedFix(word, currentRu: current == "ru") {
+        prev.words = []; lastWord = nil
+        erase(m.erase)
+        if m.ru != (current == "ru") { select(lang: m.ru ? "ru" : "en") }
+        typeText(m.text + tail)
+        lastFix = (m.text, tail, m.ru ? "en" : "ru")  // double Shift flips it to the other layout
+        return nil
     }
     guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru")
             ?? learnedFix(word, currentRu: current == "ru") else {
@@ -338,6 +356,9 @@ if CommandLine.arguments.contains("--selftest") {
     learn(selection: "b ghbdtn", fromRu: false)  // several words: not learned
     assert(learned["en:b ghbdtn"] == nil)
     learned = [:]
+    let mixed = typed("ghbdtn").enumerated().map { Key(code: $1.code, shift: false, ru: $0 >= 3) }  // "ghbвет"
+    assert(mixedFix(mixed, currentRu: true)! == (6, "привет", true))
+    assert(mixedFix(typed("hello"), currentRu: false) == nil)
     print("selftest ok")
     exit(0)
 }
