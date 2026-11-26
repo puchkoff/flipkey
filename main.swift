@@ -139,10 +139,15 @@ func currentLang() -> String? {
     let s = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
     let l = lang(s)
     if let l { sources[l] = s }
+    // The system applies our own switch a moment late; trust it so the next keys aren't tagged with the old layout.
+    if let (w, at) = lastSelect, Date().timeIntervalSince(at) < 0.6 { return w }
     return l
 }
 
+var lastSelect: (String, Date)?
+
 func select(lang wanted: String) {
+    lastSelect = (wanted, Date())
     if let s = sources[wanted] { TISSelectInputSource(s); return }
     let filter = [
         kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String,
