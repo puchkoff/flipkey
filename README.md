@@ -6,11 +6,12 @@ Flipkey fixes words you typed in the wrong keyboard layout on macOS, the way Pun
 Type `ghbdtn`, press Space, and it becomes `привет`. It works in both directions, Russian and English.
 While it runs, an A⇄Я icon sits in the menu bar; click it for About or Quit.
 
-When you press Space, Enter, Tab or a sign like `?` or `!`, Flipkey looks at the last word in both layouts.
+When you press Space, Tab or a sign like `?` or `!`, Flipkey looks at the last word in both layouts.
 If the word looks wrong in the current layout but is a real word in the other one, Flipkey retypes it and switches the layout.
 It switches to the layout you last used for that language, so it keeps ABC or U.S., Russian or Russian – PC, as you had them.
 If the layout changed while you typed a word, so half of it came out in each script, Flipkey retypes the whole word in one layout when it ends: the one where it is a real word, else the layout the word started in.
-Short words typed just before it in the same wrong layout get fixed too, so `b lfdfq` becomes `и давай`.
+Short words typed just before it in the same wrong layout get fixed too, so `pf lfdfq` becomes `за давай`.
+Enter never triggers a fix, because in chats it sends the message before the fix could land.
 
 Tap Shift twice quickly (a Shift you hold or use with a click doesn't count) to:
 
@@ -49,4 +50,4 @@ Without it the build is ad-hoc signed, and macOS silently drops the grant after 
 - Double Shift also triggers whatever else listens for it, such as Search Everywhere in JetBrains IDEs.
 - It ignores `ё` and Russian punctuation keys.
 - It leaves alone words the spell checker doesn't know, such as names and slang.
-- A short word on its own, like `b` for `и`, is too ambiguous to fix; it is fixed only together with the next word.
+- A single letter, like `b` for `и`, is never fixed automatically, because a lone `B` is often meant. Use double Shift for it.

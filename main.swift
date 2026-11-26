@@ -81,10 +81,10 @@ func converted(_ word: [Key], currentRu: Bool) -> String? {
 
 // The words right before a word, each followed by one space, that were typed in the same wrong layout,
 // like "b" in "b ghbdtn". Returns how many characters they take and their fixed text, spaces included.
-func wrongBefore(_ prev: [[Key]], currentRu ru: Bool) -> (erase: Int, text: String) {
+func wrongBefore(_ prev: [[Key]], currentRu ru: Bool, minLength: Int = 1) -> (erase: Int, text: String) {
     var text = "", erase = 0
     for p in prev.reversed() {
-        guard let f = converted(p, currentRu: ru) else { break }
+        guard p.count >= minLength, let f = converted(p, currentRu: ru) else { break }
         text = f + " " + text
         erase += p.count + 1
     }
@@ -92,12 +92,12 @@ func wrongBefore(_ prev: [[Key]], currentRu ru: Bool) -> (erase: Int, text: Stri
 }
 
 // Fixes the word plus the words right before it that were typed in the same wrong layout,
-// so "b ghbdtn" becomes "и привет". A lone short word is too ambiguous to fix on its own.
+// so "bf ghbdtn" becomes "иа привет". Single letters are never fixed automatically: "B" is often meant.
 func fixPhrase(_ prev: [[Key]], _ word: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
     var core = word, tail = ""
     while true {
         if core.count >= 2, let fix = converted(core, currentRu: ru) {
-            let b = wrongBefore(prev, currentRu: ru)
+            let b = wrongBefore(prev, currentRu: ru, minLength: 2)
             return (b.erase + word.count, b.text + fix + tail)
         }
         // In "ghbdtn," the comma key is the Russian "б" but was meant as punctuation; retry without it.
@@ -126,7 +126,7 @@ func learn(selection sel: String, fromRu ru: Bool) {
     learn(key: (ru ? "ru:" : "en:") + sel.lowercased())
 }
 func learnedFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
-    (learned[learnKey(w, ru ? "ru" : "en")] ?? 0) >= learnAfter ? (w.count, text(w, ru: !ru)) : nil
+    w.count >= 2 && (learned[learnKey(w, ru ? "ru" : "en")] ?? 0) >= learnAfter ? (w.count, text(w, ru: !ru)) : nil
 }
 
 func lang(_ s: TISInputSource) -> String? {
@@ -302,6 +302,11 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         prev.words = []  // the next word is no longer one space away from these
         return pass
     }
+    // Enter often sends a chat message at once, so a retype would land in the next one.
+    if code == returnKey {
+        lastWord = (word, tail, current, prev.words); lastFix = nil; prev.words = []
+        return pass
+    }
     if let m = mixedFix(word, currentRu: current == "ru") {
         prev.words = []; lastWord = nil
         erase(m.erase)
@@ -333,8 +338,9 @@ if CommandLine.arguments.contains("--selftest") {
     assert(converted(typed("hello"), currentRu: true) == "hello")  // typed as "руддщ"
     assert(converted(typed("vbh"), currentRu: true) == nil)  // "мир" is a real word
     assert(fixPhrase([], typed("b"), currentRu: false) == nil)  // lone "и" is too ambiguous
-    assert(fixPhrase([typed("b")], typed("ghbdtn"), currentRu: false)! == (8, "и привет"))
-    assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (6, "в доме"))
+    assert(fixPhrase([typed("b")], typed("ghbdtn"), currentRu: false)! == (6, "привет"))  // "B" may be meant
+    assert(fixPhrase([typed("pf")], typed("ghbdtn"), currentRu: false)! == (9, "за привет"))
+    assert(fixPhrase([typed("hello"), typed("d")], typed("ljvt"), currentRu: false)! == (4, "доме"))
     assert(fixPhrase([], typed("ghbdtn,"), currentRu: false)! == (7, "привет,"))  // comma kept as punctuation
     assert(fixPhrase([], typed("k.,k."), currentRu: false)! == (5, "люблю"))  // here "," and "." are letters
     assert(wrongBefore([typed("hello"), typed("pf"), typed("b")], currentRu: false) == (5, "за и "))  // double Shift on "b pf"
