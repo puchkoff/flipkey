@@ -30,7 +30,7 @@ var shiftClean = false, shiftDown = Date.distantPast, lastShiftTap = Date.distan
 var sources: [String: TISInputSource] = [:]  // the layout last used for each language, so a fix switches back to it
 // Words converted by hand with double Shift, keyed "lang:typed text", with how many times.
 var learned = UserDefaults.standard.dictionary(forKey: "learned") as? [String: Int] ?? [:]
-let learnAfter = 2  // converted by hand this many times -> converted automatically
+let learnAfter = 1  // converted by hand this many times -> converted automatically
 
 // Character maps for retyping text in the other layout, e.g. "ghbdtn" <-> "привет".
 let enToRu = Dictionary(uniqueKeysWithValues: keys.values.flatMap {
@@ -77,6 +77,33 @@ func looksWrong(_ s: String, _ lang: String) -> Bool {
 func converted(_ word: [Key], currentRu: Bool) -> String? {
     let cur = text(word, ru: currentRu), other = text(word, ru: !currentRu)
     return looksWrong(cur, currentRu ? "ru" : "en") && isWord(other, currentRu ? "en" : "ru") ? other : nil
+}
+
+// Slang and names ("pfrjvvbxty" = "закоммичен") are in no dictionary, so converted() misses them.
+// Convert anyway when the typed text is clear nonsense: no vowels, a sign inside the word, or no spelling guesses.
+func gibberish(_ s: String, _ lang: String) -> Bool {
+    guard s.count >= 4, !isWord(s, lang) else { return false }
+    if !s.contains(where: vowels[lang]!.contains) { return true }
+    if s.dropFirst().dropLast().contains(where: { !$0.isLetter }) { return true }
+    let g = NSSpellChecker.shared.guesses(forWordRange: NSRange(location: 0, length: s.utf16.count), in: s,
+                                          language: lang, inSpellDocumentWithTag: 0) ?? []
+    return g.isEmpty
+}
+
+func guessFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
+    let cur = text(w, ru: ru), other = text(w, ru: !ru), otherLang = ru ? "en" : "ru"
+    guard other.allSatisfy(\.isLetter), other.contains(where: vowels[otherLang]!.contains),
+          gibberish(cur, ru ? "ru" : "en") else { return nil }
+    return (w.count, other)
+}
+
+// Enter often sends a message at once, so only sure fixes run there: learned words, nonsense, no vowels.
+func enterFix(_ w: [Key], currentRu ru: Bool) -> (erase: Int, text: String)? {
+    if let f = learnedFix(w, currentRu: ru) ?? guessFix(w, currentRu: ru) { return f }
+    let cur = text(w, ru: ru)
+    guard cur.count >= 3, !cur.contains(where: vowels[ru ? "ru" : "en"]!.contains),
+          let f = converted(w, currentRu: ru) else { return nil }
+    return (w.count, f)
 }
 
 // The words right before a word, each followed by one space, that were typed in the same wrong layout,
@@ -302,8 +329,7 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         prev.words = []  // the next word is no longer one space away from these
         return pass
     }
-    // Enter often sends a chat message at once, so a retype would land in the next one.
-    if code == returnKey {
+    if code == returnKey, enterFix(word, currentRu: current == "ru") == nil {
         lastWord = (word, tail, current, prev.words); lastFix = nil; prev.words = []
         return pass
     }
@@ -315,8 +341,10 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         lastFix = (m.text, tail, m.ru ? "en" : "ru")  // double Shift flips it to the other layout
         return nil
     }
-    guard let fix = fixPhrase(prev.words, word, currentRu: current == "ru")
-            ?? learnedFix(word, currentRu: current == "ru") else {
+    let isRu = current == "ru"
+    guard let fix = code == returnKey ? enterFix(word, currentRu: isRu)
+            : fixPhrase(prev.words, word, currentRu: isRu) ?? learnedFix(word, currentRu: isRu)
+            ?? guessFix(word, currentRu: isRu) else {
         lastWord = (word, tail, current, prev.words); lastFix = nil
         prev.words = tail == " " ? Array((prev.words + [word]).suffix(5)) : []
         return pass
@@ -359,7 +387,7 @@ if CommandLine.arguments.contains("--selftest") {
     assert(lastWord == nil)
     learned = [:]
     assert(learnedFix(typed("nbgf"), currentRu: false) == nil)
-    learn(typed("nbgf"), "en"); learn(typed("nbgf"), "en")
+    learn(typed("nbgf"), "en")
     assert(learnedFix(typed("nbgf"), currentRu: false)! == (4, "типа"))
     learned = [:]
     learn(selection: "Nbgf", fromRu: false); learn(selection: "nbgf", fromRu: false)
@@ -370,6 +398,11 @@ if CommandLine.arguments.contains("--selftest") {
     let mixed = typed("ghbdtn").enumerated().map { Key(code: $1.code, shift: false, ru: $0 >= 3) }  // "ghbвет"
     assert(mixedFix(mixed, currentRu: true)! == (6, "привет", true))
     assert(mixedFix(typed("hello"), currentRu: false) == nil)
+    assert(guessFix(typed("cvthl;ty"), currentRu: false)! == (8, "смерджен"))  // ";" inside the word
+    assert(guessFix(typed("hello"), currentRu: false) == nil)
+    assert(guessFix(typed("ghbdtn"), currentRu: true) == nil)  // "привет" is a real word
+    assert(enterFix(typed("ghbdtn"), currentRu: false)! == (6, "привет"))  // no vowels
+    assert(enterFix(typed("hello"), currentRu: false) == nil)
     print("selftest ok")
     exit(0)
 }
